@@ -1,32 +1,72 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>EzQR with Center Image</title>
-<style>
-  body { font-family: sans-serif; text-align: center; margin-top: 50px; }
-  input { font-size: 18px; padding: 8px; width: 300px; max-width: 90%; }
-  button { font-size: 18px; padding: 8px 16px; margin-left: 8px; }
-  canvas { margin-top: 20px; border: 1px solid #000; }
-</style>
-</head>
-<body>
 
-<h1>EzQR with Center Image</h1>
-<input id="qrText" placeholder="Type text or URL">
-<input id="imgURL" placeholder="Image URL (optional)" style="margin-top:10px;">
-<br>
-<button onclick="generate()">Generate QR</button>
-<canvas id="qrCanvas" width="210" height="210"></canvas>
 
-<script type="module">
-import { generateQR } from 'https://cdn.jsdelivr.net/gh/Jamesthegoose1/EzQR/EzQR.js';
+function encodeData(text) {
+    let bits = "0100";
+    bits += text.length.toString(2).padStart(8, "0");
+    for (let c of text) bits += c.charCodeAt(0).toString(2).padStart(8, "0");
+    bits += "0000";
+    while (bits.length % 8 !== 0) bits += "0";
+    const target = 152;
+    let padToggle = true;
+    while (bits.length < target) {
+        bits += padToggle ? "11101100" : "00010001";
+        padToggle = !padToggle;
+    }
+    return bits;
+}
 
-const canvas = document.getElementById('qrCanvas');
-const ctx = canvas.getContext('2d');
+function placeFinder(m, x, y) {
+    for (let r = 0; r < 7; r++) {
+        for (let c = 0; c < 7; c++) {
+            const border = r === 0 || r === 6 || c === 0 || c === 6;
+            const center = r >= 2 && r <= 4 && c >= 2 && c <= 4;
+            m[y + r][x + c] = border || center;
+        }
+    }
+}
 
-function drawMatrix(matrix) {
+function buildMatrix(dataBits) {
+    const size = 21;
+    const m = [...Array(size)].map(() => Array(size).fill(null));
+    placeFinder(m, 0, 0);
+    placeFinder(m, size - 7, 0);
+    placeFinder(m, 0, size - 7);
+    for (let i = 8; i < size - 8; i++) {
+        m[6][i] = i % 2 === 0;
+        m[i][6] = i % 2 === 0;
+    }
+    let row = size - 1, col = size - 1, dir = -1, bitIdx = 0;
+    while (col > 0) {
+        if (col === 6) col--;
+        for (let i = 0; i < size; i++) {
+            const r = row + dir * i;
+            if (r < 0 || r >= size) break;
+            for (let c = 0; c < 2; c++) {
+                const cc = col - c;
+                if (m[r][cc] !== null) continue;
+                if (bitIdx < dataBits.length) {
+                    m[r][cc] = dataBits[bitIdx] === "1";
+                    bitIdx++;
+                } else {
+                    m[r][cc] = false;
+                }
+            }
+        }
+        row += dir * (size - 1);
+        dir = -dir;
+        col -= 2;
+    }
+    return m;
+}
+
+// Generates the QR matrix for a given text
+export function generateQR(text) {
+    return buildMatrix(encodeData(text));
+}
+
+// Draws a QR matrix to a canvas
+export function drawMatrix(matrix, canvas) {
+    const ctx = canvas.getContext('2d');
     const size = matrix.length;
     const scale = canvas.width / size;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -37,30 +77,18 @@ function drawMatrix(matrix) {
     }
 }
 
-function drawQRWithImage(matrix, imageSrc, imgScale = 0.25) {
-    drawMatrix(matrix);
-
-    if (imageSrc) {
-        const img = new Image();
-        img.crossOrigin = "anonymous";
-        img.onload = () => {
-            const size = canvas.width * imgScale;
-            const x = (canvas.width - size) / 2;
-            const y = (canvas.height - size) / 2;
-            ctx.drawImage(img, x, y, size, size);
-        };
-        img.src = imageSrc;
-    }
+// Draws a QR matrix to a canvas with a center image
+export function drawQRWithImage(matrix, canvas, imageSrc, imgScale = 0.25) {
+    drawMatrix(matrix, canvas);
+    if (!imageSrc) return;
+    const ctx = canvas.getContext('2d');
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+        const size = canvas.width * imgScale;
+        const x = (canvas.width - size) / 2;
+        const y = (canvas.height - size) / 2;
+        ctx.drawImage(img, x, y, size, size);
+    };
+    img.src = imageSrc;
 }
-
-window.generate = () => {
-    const text = document.getElementById('qrText').value;
-    const imgURL = document.getElementById('imgURL').value;
-    if (!text) return alert('Enter some text!');
-    const matrix = generateQR(text);
-    drawQRWithImage(matrix, imgURL, 0.3);
-};
-</script>
-
-</body>
-</html>
